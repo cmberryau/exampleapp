@@ -1,0 +1,59 @@
+# azureSubscriptionEndpoint (see under project settings->service connections)
+# azureContainerRegistry (something.azurecr.io)
+# pypiRepositoryURL
+# pypiUsername
+# pypiPassword
+
+trigger:
+- master
+
+variables:
+    vmImageName: 'Ubuntu-16.04'
+    testImageName: 'exampleapp'
+    testContainerName: 'exampleapp-tests-run'
+    testResultsFileName: 'test-results.xml'
+    packageContainerName: 'exampleapp-package-run'
+    packageFolderName: 'exampleapp'
+
+stages:
+  # build stage handles testing and building
+  - stage: Build
+    displayName: Build stage
+    jobs:
+      - job: Build
+        displayName: Build and test images
+        pool:
+          vmImage: $(vmImageName)
+        steps:
+        # build our images
+        - task: DockerCompose@0
+          displayName: Build images
+          inputs:
+            action: Build services
+            azureSubscriptionEndpoint: $(azureSubscriptionEndpoint)
+            azureContainerRegistry: $(azureContainerRegistry)
+            dockerComposeFile: docker-compose.yaml
+            projectName: $(Build.Repository.Name)
+            qualifyImageNames: true
+            additionalImageTags: $(Build.SourceVersion)
+
+        # run the test image in a container
+        - script: |
+            docker run --name $(testContainerName) $(azureContainerRegistry)/$(testImageName):$(Build.SourceVersion) python runtests.py
+          displayName: 'Execute runtests.py in container'
+
+        # copy the test results out of the container
+        - script: |
+            docker cp $(testContainerName):/app/$(testResultsFileName) ./$(testResultsFileName)
+          displayName: 'Copy test results from test container'
+
+        # publish test results
+        - task: PublishTestResults@2
+          inputs:
+            testResultsFiles: $(testResultsFileName)
+          displayName: 'Publish test results'
+
+        # build the package
+        - script: |
+            docker run --name $(packageContainerName) $(azureContainerRegistry)/$(testImageName):$(Build.SourceVersion) /bin/bash -c "python setup.py bdist_wheel && twine upload --repository-url $(pypiRepositoryURL) -u $(pypiUsername) -p $(pypiPassword) ./dist/*"
+          displayName: 'Build and upload wheel in container'

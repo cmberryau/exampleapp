@@ -1,0 +1,4 @@
+include README.md
+recursive-include exampleapp/migrations *.py
+recursive-include exampleapp/templates *.html
+recursive-include exampleapp/static *.*
